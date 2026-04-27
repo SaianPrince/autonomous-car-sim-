@@ -2,38 +2,40 @@
 #include <iostream>
 #include <winsock2.h>
 #include <ws2tcpip.h>
+#include <optional>
 
 #pragma comment(lib,"ws2_32.lib")
 
 int main()
 {
+    // SFML 3.0 uses sf::Vector2u for VideoMode
     sf::RenderWindow window(
-        sf::VideoMode(800, 600),
+        sf::VideoMode({800, 600}),
         "Autonomous Driving Simulation"
     );
 
     // Vehicle
     sf::RectangleShape vehicle(
-        sf::Vector2f(50.f, 80.f)
+        sf::Vector2f({50.f, 80.f})
     );
 
     vehicle.setFillColor(sf::Color::Red);
-    vehicle.setPosition(375.f, 450.f);
+    vehicle.setPosition({375.f, 450.f});
 
     // Lane markers
     sf::RectangleShape leftLane(
-        sf::Vector2f(5.f, 600.f)
+        sf::Vector2f({5.f, 600.f})
     );
 
-    leftLane.setPosition(300.f, 0.f);
+    leftLane.setPosition({300.f, 0.f});
     leftLane.setFillColor(sf::Color::White);
 
 
     sf::RectangleShape rightLane(
-        sf::Vector2f(5.f, 600.f)
+        sf::Vector2f({5.f, 600.f})
     );
 
-    rightLane.setPosition(500.f, 0.f);
+    rightLane.setPosition({500.f, 0.f});
     rightLane.setFillColor(sf::Color::White);
 
 
@@ -79,11 +81,10 @@ int main()
 
     while (window.isOpen())
     {
-        sf::Event event;
-
-        while (window.pollEvent(event))
+        // SFML 3.0 new event system
+        while (const std::optional event = window.pollEvent())
         {
-            if (event.type == sf::Event::Closed)
+            if (event->is<sf::Event::Closed>())
                 window.close();
         }
 
@@ -94,7 +95,7 @@ int main()
         send(
             clientSocket,
             frameMessage,
-            strlen(frameMessage),
+            (int)strlen(frameMessage),
             0
         );
 
