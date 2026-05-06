@@ -1,56 +1,102 @@
+"""
+brain.py  —  Hafta 3: Kapalı Döngü Otonom Sürüş
+─────────────────────────────────────────────────
+Protokol (C++ ile aynı):
+  C++ → Python : 200×200 RGBA ham piksel (160_000 byte)
+  Python → C++ : ASCII string  örn. "12.45\n"  (std::stof ile okunur)
+"""
+
 import socket
 import struct
+import time
 import numpy as np
 import cv2
 
 HOST = '127.0.0.1'
 PORT = 5000
 
-ROI_WIDTH  = 200
-ROI_HEIGHT = 200
-IMAGE_SIZE = ROI_WIDTH * ROI_HEIGHT * 4  # RGBA: 4 bytes per pixel
+ROI_W = 200
+ROI_H = 200
+IMAGE_SIZE = ROI_W * ROI_H * 4  # RGBA
 
 
-# ──────────────────────────────────────────────
+# ══════════════════════════════════════════════
 # TCP HELPER
-# ──────────────────────────────────────────────
+# ══════════════════════════════════════════════
 def receive_all(sock: socket.socket, size: int) -> bytes | None:
-    """Guarantee we receive exactly `size` bytes."""
     data = b''
     while len(data) < size:
-        packet = sock.recv(size - len(data))
-        if not packet:
+        chunk = sock.recv(size - len(data))
+        if not chunk:
             return None
-        data += packet
+        data += chunk
     return data
 
 
-# ──────────────────────────────────────────────
+# ══════════════════════════════════════════════
+# PID CONTROLLER (Python tarafı)
+# ══════════════════════════════════════════════
+class PIDController:
+    """
+    Hafta 3 hedefi: P dışında I ve D terimlerini de kullan.
+    C++ tarafında da PID var; Python'un PID'i OFFSET'i açıya çevirir,
+    C++'ın PID'i ise bu açıyı gerçek dönüş miktarına çevirir.
+    """
+
+    def __init__(self, kp: float = 0.4, ki: float = 0.0, kd: float = 0.05):
+        self.kp = kp
+        self.ki = ki
+        self.kd = kd
+        self._prev_error  = 0.0
+        self._integral    = 0.0
+
+    def compute(self, error: float, dt: float) -> float:
+        if dt <= 0:
+            dt = 1e-6
+
+        self._integral   += error * dt
+        derivative        = (error - self._prev_error) / dt
+        self._prev_error  = error
+
+        output = (self.kp * error
+                  + self.ki * self._integral
+                  + self.kd * derivative)
+
+        # Maksimum direksiyon açısını sınırla
+        return float(np.clip(output, -30.0, 30.0))
+
+    def reset(self):
+        self._prev_error = 0.0
+        self._integral   = 0.0
+
+
+# ══════════════════════════════════════════════
 # LANE DETECTION
-# ──────────────────────────────────────────────
-def detect_lanes(rgba_bytes: bytes) -> tuple[float, np.ndarray]:
+# ══════════════════════════════════════════════
+def detect_lanes(rgba_bytes: bytes,
+                 pid: PIDController,
+                 dt: float) -> tuple[float, np.ndarray]:
     """
-    Takes raw RGBA bytes, runs lane detection, and returns:
-      - angle  : steering angle (float, degrees)
-      - debug  : annotated BGR image for display
+    RGBA baytlarından şeritleri tespit eder, PID ile açı hesaplar.
+    Döndürür: (angle_str, debug_image)
     """
-    # 1. RGBA → numpy array → Grayscale
+    # 1. RGBA → Grayscale
     arr  = np.frombuffer(rgba_bytes, dtype=np.uint8)
-    rgba = arr.reshape((ROI_HEIGHT, ROI_WIDTH, 4))
+    rgba = arr.reshape((ROI_H, ROI_W, 4))
     gray = cv2.cvtColor(rgba, cv2.COLOR_RGBA2GRAY)
 
-    # 2. Blur → Canny edge detection
+    # 2. Blur + Canny
     blurred = cv2.GaussianBlur(gray, (5, 5), 0)
-    edges   = cv2.Canny(blurred, threshold1=50, threshold2=150)
+    edges   = cv2.Canny(blurred, 50, 150)
 
-    # 3. Mask: focus on the bottom half (where lanes are)
+    # 3. ROI maskesi: sadece alt yarı
     mask = np.zeros_like(edges)
-    mask[ROI_HEIGHT // 2:, :] = 255
-    masked_edges = cv2.bitwise_and(edges, mask)
+    mask[ROI_H // 2:, :] = 255
+    masked = cv2.bitwise_and(edges, mask)
 
-    # 4. Hough Line Transform
+    # 4. Hough Lines
     lines = cv2.HoughLinesP(
-        masked_edges,
+        masked,
         rho=1,
         theta=np.pi / 180,
         threshold=20,
@@ -58,10 +104,8 @@ def detect_lanes(rgba_bytes: bytes) -> tuple[float, np.ndarray]:
         maxLineGap=30
     )
 
-    # 5. Separate left / right lanes by slope
-    left_xs  = []
-    right_xs = []
-    debug_bgr = cv2.cvtColor(gray, cv2.COLOR_GRAY2BGR)
+    left_xs, right_xs = [], []
+    debug = cv2.cvtColor(gray, cv2.COLOR_GRAY2BGR)
 
     if lines is not None:
         for line in lines:
@@ -69,105 +113,127 @@ def detect_lanes(rgba_bytes: bytes) -> tuple[float, np.ndarray]:
             if x2 == x1:
                 continue
             slope = (y2 - y1) / (x2 - x1)
-
-            # Skip nearly horizontal lines (noise)
-            if abs(slope) < 0.3:
+            if abs(slope) < 0.3:   # yatay gürültüyü at
                 continue
-
-            # Positive slope in image coords = right lane, negative = left
-            if slope < 0:
+            if slope < 0:          # sol şerit
                 left_xs.extend([x1, x2])
-                cv2.line(debug_bgr, (x1, y1), (x2, y2), (255, 80, 0), 2)   # blue
-            else:
+                cv2.line(debug, (x1, y1), (x2, y2), (255, 80, 0), 2)
+            else:                   # sağ şerit
                 right_xs.extend([x1, x2])
-                cv2.line(debug_bgr, (x1, y1), (x2, y2), (0, 80, 255), 2)   # red
+                cv2.line(debug, (x1, y1), (x2, y2), (0, 80, 255), 2)
 
-    # 6. Compute lane centre & steering offset
-    image_centre = ROI_WIDTH / 2.0
-    angle = 0.0
-
-    left_x  = np.mean(left_xs)  if left_xs  else None
-    right_x = np.mean(right_xs) if right_xs else None
+    # 5. Merkez & offset
+    cx = ROI_W / 2.0
+    left_x  = float(np.mean(left_xs))  if left_xs  else None
+    right_x = float(np.mean(right_xs)) if right_xs else None
 
     if left_x is not None and right_x is not None:
-        lane_centre = (left_x + right_x) / 2.0
+        lane_cx = (left_x + right_x) / 2.0
     elif left_x is not None:
-        lane_centre = left_x + 50          # estimate: lane is ~100px wide
+        lane_cx = left_x + 50.0
     elif right_x is not None:
-        lane_centre = right_x - 50
+        lane_cx = right_x - 50.0
     else:
-        lane_centre = image_centre          # no lane found → go straight
+        lane_cx = cx            # şerit yok → düz git
 
-    offset = image_centre - lane_centre     # positive = drift left, steer right
-    Kp     = 0.3                            # proportional gain
-    angle  = float(np.clip(offset * Kp, -30.0, 30.0))
+    offset = cx - lane_cx       # + = sola kaydı → sağa dön
 
-    # 7. Draw debug overlays
-    cv2.line(debug_bgr,
-             (int(lane_centre), ROI_HEIGHT // 2),
-             (int(lane_centre), ROI_HEIGHT),
-             (0, 255, 0), 2)               # green = lane centre
-    cv2.line(debug_bgr,
-             (int(image_centre), ROI_HEIGHT // 2),
-             (int(image_centre), ROI_HEIGHT),
-             (0, 255, 255), 1)             # yellow = image centre
-    cv2.putText(debug_bgr,
-                f"angle: {angle:.1f} deg",
-                (5, 20),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                0.55, (255, 255, 255), 1)
+    # 6. PID → açı
+    angle = pid.compute(offset, dt)
 
-    return angle, debug_bgr
+    # 7. Debug çizimler
+    cv2.line(debug, (int(lane_cx), ROI_H // 2),
+             (int(lane_cx), ROI_H), (0, 255, 0), 2)     # yeşil = şerit merkezi
+    cv2.line(debug, (int(cx), ROI_H // 2),
+             (int(cx), ROI_H), (0, 255, 255), 1)          # sarı = görüntü merkezi
+    cv2.putText(debug,
+                f"offset:{offset:+.1f}  angle:{angle:+.2f}",
+                (4, 18), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (255, 255, 255), 1)
+    cv2.putText(debug,
+                f"Kp={pid.kp} Ki={pid.ki} Kd={pid.kd}",
+                (4, 34), cv2.FONT_HERSHEY_SIMPLEX, 0.38, (200, 200, 100), 1)
+
+    return angle, debug
 
 
-# ──────────────────────────────────────────────
+# ══════════════════════════════════════════════
 # SERVER
-# ──────────────────────────────────────────────
+# ══════════════════════════════════════════════
 def start_server() -> None:
     server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     server_socket.bind((HOST, PORT))
     server_socket.listen(1)
-
     print(f"[BRAIN] Listening on {HOST}:{PORT}...", flush=True)
 
     conn, addr = server_socket.accept()
     print(f"[BRAIN] C++ connected from {addr}", flush=True)
 
-    frame_count = 0
+    pid = PIDController(kp=0.4, ki=0.0, kd=0.05)
+
+    frame_n  = 0
+    prev_t   = time.perf_counter()
+    latencies = []
 
     try:
         while True:
-            # ── Receive raw RGBA frame ─────────────────
-            image_data = receive_all(conn, IMAGE_SIZE)
-            if image_data is None:
-                print("[BRAIN] Connection closed by C++.", flush=True)
+            t0 = time.perf_counter()
+
+            # ── 1. Frame al ───────────────────────────
+            raw = receive_all(conn, IMAGE_SIZE)
+            if raw is None:
+                print("[BRAIN] Bağlantı kesildi.", flush=True)
                 break
 
-            frame_count += 1
+            t1 = time.perf_counter()
+            dt = t1 - prev_t
+            prev_t = t1
 
-            # ── Lane detection ─────────────────────────
-            angle, debug_img = detect_lanes(image_data)
+            # ── 2. Lane detection + PID ───────────────
+            angle, debug_img = detect_lanes(raw, pid, dt)
 
-            print(f"[FRAME {frame_count:04d}] angle = {angle:+.2f} deg", flush=True)
+            # ── 3. C++'a STRING olarak gönder ─────────
+            # C++: angleError = std::stof(commandBuffer)
+            msg = f"{angle:.4f}\n"
+            conn.sendall(msg.encode('ascii'))
 
-            # ── Show debug window ──────────────────────
-            cv2.imshow("Lane Detection Debug", debug_img)
+            t2 = time.perf_counter()
+            latency_ms = (t2 - t0) * 1000
+            latencies.append(latency_ms)
+            frame_n += 1
+
+            # ── 4. Terminal log (her 10 frame) ────────
+            if frame_n % 10 == 0:
+                avg_lat = sum(latencies[-10:]) / 10
+                fps     = 1.0 / dt if dt > 0 else 0
+                print(
+                    f"[FRAME {frame_n:05d}] "
+                    f"angle={angle:+.2f}°  "
+                    f"latency={latency_ms:.1f}ms  "
+                    f"fps={fps:.1f}",
+                    flush=True
+                )
+
+            # ── 5. Debug penceresi ────────────────────
+            cv2.imshow("Lane Detection — Hafta 3", debug_img)
             if cv2.waitKey(1) & 0xFF == ord('q'):
+                print("[BRAIN] Kullanıcı Q'ya bastı, durduruluyor.", flush=True)
                 break
-
-            # ── Send steering angle back to C++ ───────
-            # Pack as 4-byte little-endian float
-            conn.sendall(struct.pack('<f', angle))
 
     except Exception as e:
-        print(f"[BRAIN] Error: {e}", flush=True)
+        print(f"[BRAIN] Hata: {e}", flush=True)
 
     finally:
         cv2.destroyAllWindows()
         conn.close()
         server_socket.close()
-        print("[BRAIN] Server closed.", flush=True)
+        if latencies:
+            print(
+                f"\n[BRAIN] Ortalama gecikme: {sum(latencies)/len(latencies):.1f} ms  "
+                f"({frame_n} frame)",
+                flush=True
+            )
+        print("[BRAIN] Server kapatıldı.", flush=True)
 
 
 if __name__ == "__main__":
