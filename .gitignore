@@ -1,0 +1,30 @@
+# C++ Build outputs & Executables
+*.exe
+build/
+*.o
+*.obj
+
+# Dynamic Libraries
+*.dll
+
+# Heavy Assets / External Libraries
+SFML-2.6.2/
+SFML2.zip
+
+# Machine Learning & Datasets
+dataset/
+runs/
+*.pt
+
+# Python Caches & Virtual Environments
+__pycache__/
+*.py[cod]
+*$py.class
+.env
+venv/
+env/
+
+# IDE & OS Specific Files
+.vscode/
+.DS_Store
+Thumbs.db

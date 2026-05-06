@@ -1,10 +1,12 @@
-﻿#include <SFML/Graphics.hpp>
+#include <SFML/Graphics.hpp>
 #include <SFML/System.hpp>
 #include <iostream>
 #include <winsock2.h>
 #include <ws2tcpip.h>
 #include <cmath>
 #include <string>
+#include <cstdlib>
+#include <ctime>
 
 #include "PIDController.h"
 
@@ -66,6 +68,8 @@ sf::Image captureRoiFromWindow(sf::RenderWindow& window, sf::RectangleShape& veh
 
 int main()
 {
+    std::srand(static_cast<unsigned int>(std::time(nullptr)));
+
     sf::RenderWindow window(
         sf::VideoMode(WINDOW_WIDTH, WINDOW_HEIGHT),
         "Autonomous Driving Simulation"
@@ -74,30 +78,26 @@ int main()
     sf::RectangleShape vehicle(sf::Vector2f(50.f, 80.f));
     vehicle.setFillColor(sf::Color::Blue);
     vehicle.setOrigin(25.f, 40.f);
-    vehicle.setPosition(400.f, 520.f);
+    vehicle.setPosition(325.f, 520.f);
     vehicle.setRotation(0.f);
 
-    // 3-lane road boundaries
+    // 2-lane road boundaries
     sf::RectangleShape laneLine1(sf::Vector2f(5.f, 600.f));
     laneLine1.setFillColor(sf::Color::White);
     laneLine1.setPosition(250.f, 0.f);
 
     sf::RectangleShape laneLine2(sf::Vector2f(5.f, 600.f));
-    laneLine2.setFillColor(sf::Color::White);
-    laneLine2.setPosition(350.f, 0.f);
+    laneLine2.setFillColor(sf::Color(255, 255, 0)); // Yellow center line
+    laneLine2.setPosition(400.f, 0.f);
 
     sf::RectangleShape laneLine3(sf::Vector2f(5.f, 600.f));
     laneLine3.setFillColor(sf::Color::White);
-    laneLine3.setPosition(450.f, 0.f);
+    laneLine3.setPosition(550.f, 0.f);
 
-    sf::RectangleShape laneLine4(sf::Vector2f(5.f, 600.f));
-    laneLine4.setFillColor(sf::Color::White);
-    laneLine4.setPosition(550.f, 0.f);
-
-    // Obstacle in the middle lane
+    // Obstacle in the left lane
     sf::RectangleShape obstacle(sf::Vector2f(45.f, 45.f));
     obstacle.setFillColor(sf::Color::Red);
-    obstacle.setPosition(377.f, 160.f);
+    obstacle.setPosition(310.f, 160.f);
 
     WSADATA wsaData;
 
@@ -133,10 +133,10 @@ int main()
     }
 
     std::cout << "Connected to Python server\n";
+    // Python'dan gelen komutu doğrudan dönüş hızı olarak kullanacağız.
+    // PIDController steeringPID(0.04f, 0.0f, 0.01f);
 
-    PIDController steeringPID(0.04f, 0.0f, 0.01f);
-
-    float vehicleSpeed = 70.f;
+    float vehicleSpeed = 120.f;
     float angleError = 0.f;
 
     sf::Clock clock;
@@ -160,7 +160,6 @@ int main()
         window.draw(laneLine1);
         window.draw(laneLine2);
         window.draw(laneLine3);
-        window.draw(laneLine4);
 
         window.draw(obstacle);
         window.draw(vehicle);
@@ -212,10 +211,10 @@ int main()
                 std::cout << "Invalid command from Python\n";
             }
         }
-
-        float steering = steeringPID.calculate(angleError, deltaTime);
-
-        vehicle.rotate(steering);
+        // Python'dan gelen komut (angleError) bir direksiyon açısıdır.
+        // Matematiksel hesaplama: 30 derece komut -> 60 derece/saniye dönüş hızı
+        float turnRate = angleError * 2.0f;
+        vehicle.rotate(turnRate * deltaTime);
 
         float rotation = vehicle.getRotation() - 90.f;
         float radian = rotation * 3.14159f / 180.f;
@@ -225,7 +224,31 @@ int main()
             std::sin(radian)
         );
 
-        vehicle.move(direction * vehicleSpeed * deltaTime);
+        // Treadmill effect: aracın sadece X ekseninde hareket etmesine izin ver
+        vehicle.move(direction.x * vehicleSpeed * deltaTime, 0.f);
+        
+        // Engeli aracın Y hızına göre aşağı kaydır (sanki araba ileri gidiyormuş gibi)
+        obstacle.move(0.f, -direction.y * vehicleSpeed * deltaTime);
+
+        // Engel ekrandan çıkınca başa sar (sonsuz yol + rastgele şerit + rastgele zaman)
+        if (obstacle.getPosition().y > 600.f)
+        {
+            float newX = (std::rand() % 2 == 0) ? 310.f : 480.f;
+            float newY = -200.f - (std::rand() % 1000);
+            obstacle.setPosition(newX, newY);
+        }
+
+        // Şerit Sınırları (Kesinlikle yoldan çıkmayı engeller)
+        // Yolun sol çizgisi X=250, sağ çizgisi X=550. Araç genişliği 50.
+        // Merkez noktası (origin) x=25 olduğu için:
+        // Sol sınır: 250 + 25 = 275
+        // Sağ sınır: 550 - 25 = 525
+        float currentX = vehicle.getPosition().x;
+        if (currentX < 275.f) {
+            vehicle.setPosition(275.f, vehicle.getPosition().y);
+        } else if (currentX > 525.f) {
+            vehicle.setPosition(525.f, vehicle.getPosition().y);
+        }
 
         sf::sleep(sf::milliseconds(16));
     }

@@ -6,31 +6,42 @@ set MODE=%1
 if /i "%MODE%"=="test" goto TEST_MODE
 
 REM ══════════════════════════════════════════════
-REM  NORMAL MOD: C++ derle ve calistir
+REM  NORMAL MOD: C++ derle (SFML 2.6.2) ve calistir
 REM ══════════════════════════════════════════════
-echo [BUILD] Derleme baslatiliyor...
+echo [BUILD] SFML 2.6.2 ile derleme baslatiliyor...
 set PATH=C:\msys64\mingw64\bin;%PATH%
 
-g++ main.cpp -o sim.exe ^
--IC:\msys64\mingw64\include ^
--LC:\msys64\mingw64\lib ^
--lsfml-graphics -lsfml-window -lsfml-system -lsfml-network -lws2_32
+set SFML_DIR=%~dp0SFML-2.6.2
+
+g++ main.cpp PIDController.cpp -o sim.exe ^
+-I"%SFML_DIR%\include" ^
+-L"%SFML_DIR%\lib" ^
+-lsfml-graphics -lsfml-window -lsfml-system -lsfml-network ^
+-lws2_32
 
 if %ERRORLEVEL% NEQ 0 (
     echo.
     echo [ERROR] Derleme basarisiz!
-    echo        C++ tarafini test etmek icin: .\baslat.bat test
+    echo        Python mock test icin: .\baslat.bat test
     pause
     exit /b 1
 )
 
 echo [SUCCESS] Derleme basarili!
 echo.
-echo [BRAIN] Python sunucusu yeni pencerede baslatiliyor...
-start "Python Brain" cmd /k "python brain.py"
 
-echo [SIM] 2 saniye bekleniyor...
-timeout /t 2 /nobreak >nul
+REM SFML 2.x DLL'leri exe'nin yanına kopyala (ilk seferde)
+if not exist sfml-graphics-2.dll (
+    echo [SETUP] SFML DLL dosyalari kopyalaniyor...
+    copy "%SFML_DIR%\bin\*.dll" . >nul 2>&1
+    echo [SETUP] Tamam.
+)
+
+echo [BRAIN] Python sunucusu yeni pencerede baslatiliyor...
+start "Python Brain" cmd /k "C:\Users\Ali\anaconda3\python.exe brain.py"
+
+echo [SIM] YOLOv8 modeli yuklenirken bekleniyor (8 saniye)...
+timeout /t 8 /nobreak >nul
 
 echo [SIM] Simulasyon baslatiliyor...
 sim.exe
