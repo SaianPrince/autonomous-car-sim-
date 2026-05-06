@@ -3,6 +3,10 @@
 #include <iostream>
 #include <winsock2.h>
 #include <ws2tcpip.h>
+#include <cmath>
+#include <string>
+
+#include "PIDController.h"
 
 #pragma comment(lib, "ws2_32.lib")
 
@@ -63,7 +67,9 @@ int main()
 
     sf::RectangleShape vehicle(sf::Vector2f(50.f, 80.f));
     vehicle.setFillColor(sf::Color::Red);
-    vehicle.setPosition(375.f, 450.f);
+    vehicle.setOrigin(25.f, 40.f);
+    vehicle.setPosition(400.f, 500.f);
+    vehicle.setRotation(0.f);
 
     sf::RectangleShape leftLane(sf::Vector2f(5.f, 600.f));
     leftLane.setFillColor(sf::Color::White);
@@ -116,8 +122,17 @@ int main()
 
     std::cout << "Connected to Python server\n";
 
+    PIDController steeringPID(0.08f, 0.0f, 0.02f);
+
+    float vehicleSpeed = 100.f;
+    float angleError = 0.f;
+
+    sf::Clock clock;
+
     while (window.isOpen())
     {
+        float deltaTime = clock.restart().asSeconds();
+
         sf::Event event;
 
         while (window.pollEvent(event))
@@ -153,6 +168,53 @@ int main()
             std::cout << "Send failed\n";
             break;
         }
+
+        char commandBuffer[1024] = {};
+
+        int receivedBytes = recv(
+            clientSocket,
+            commandBuffer,
+            sizeof(commandBuffer) - 1,
+            0
+        );
+
+        if (receivedBytes > 0)
+        {
+            commandBuffer[receivedBytes] = '\0';
+
+            try
+            {
+                angleError = std::stof(commandBuffer);
+
+                std::cout
+                    << "Angle from Python: "
+                    << angleError
+                    << std::endl;
+            }
+            catch (...)
+            {
+                std::cout << "Invalid angle from Python\n";
+            }
+        }
+
+        float steering = steeringPID.calculate(
+            angleError,
+            deltaTime
+        );
+
+        vehicle.rotate(steering);
+
+        float rotation = vehicle.getRotation() - 90.f;
+        float radian = rotation * 3.14159f / 180.f;
+
+        sf::Vector2f direction(
+            std::cos(radian),
+            std::sin(radian)
+        );
+
+        vehicle.move(
+            direction * vehicleSpeed * deltaTime
+        );
 
         std::cout << "Frame sent\n";
 
