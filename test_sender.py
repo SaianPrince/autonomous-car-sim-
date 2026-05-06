@@ -80,15 +80,15 @@ def run() -> None:
             # C++ ile aynı: önce 4 byte boyut YOK — doğrudan 160_000 byte gönder
             sock.sendall(frame_bytes)
 
-            # brain.py'den angle float'ını oku (4 byte)
+            # brain.py'den HAFTA 3 protokolü: ASCII string  "12.45\n"
             raw = b''
-            while len(raw) < 4:
-                chunk = sock.recv(4 - len(raw))
-                if not chunk:
+            while not raw.endswith(b'\n'):
+                ch = sock.recv(1)
+                if not ch:
                     raise ConnectionResetError("brain.py bağlantıyı kapattı")
-                raw += chunk
+                raw += ch
 
-            angle = struct.unpack('<f', raw)[0]
+            angle = float(raw.decode('ascii').strip())
             print(f"[MOCK C++] Frame {frame_idx:04d} → angle = {angle:+.2f}°", flush=True)
 
             frame_idx += 1
