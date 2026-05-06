@@ -66,7 +66,7 @@ int main()
     );
 
     sf::RectangleShape vehicle(sf::Vector2f(50.f, 80.f));
-    vehicle.setFillColor(sf::Color::Red);
+    vehicle.setFillColor(sf::Color::Blue);
     vehicle.setOrigin(25.f, 40.f);
     vehicle.setPosition(400.f, 500.f);
     vehicle.setRotation(0.f);
