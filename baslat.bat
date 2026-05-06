@@ -2,7 +2,10 @@
 echo [BUILD] Derleme baslatiliyor...
 set PATH=C:\msys64\mingw64\bin;%PATH%
 
-g++ main.cpp -o sim.exe -lsfml-graphics -lsfml-window -lsfml-system -lsfml-network -lws2_32
+g++ main.cpp -o sim.exe ^
+-IC:\msys64\mingw64\include ^
+-LC:\msys64\mingw64\lib ^
+-lsfml-graphics -lsfml-window -lsfml-system -lsfml-network -lws2_32
 
 if %ERRORLEVEL% EQU 0 (
     echo [SUCCESS] Derleme basarili! Simülasyon baslatiliyor...
