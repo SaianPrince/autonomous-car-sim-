@@ -79,6 +79,10 @@ int main()
     rightLane.setFillColor(sf::Color::White);
     rightLane.setPosition(500.f, 0.f);
 
+    sf::RectangleShape obstacle(sf::Vector2f(80.f, 80.f));
+    obstacle.setFillColor(sf::Color::Red);
+    obstacle.setPosition(360.f, 180.f);
+
     WSADATA wsaData;
 
     if (WSAStartup(MAKEWORD(2, 2), &wsaData) != 0)
@@ -126,6 +130,7 @@ int main()
 
     float vehicleSpeed = 100.f;
     float angleError = 0.f;
+    bool emergencyStop = false;
 
     sf::Clock clock;
 
@@ -147,6 +152,7 @@ int main()
 
         window.draw(leftLane);
         window.draw(rightLane);
+        window.draw(obstacle);
         window.draw(vehicle);
 
         window.display();
@@ -182,18 +188,30 @@ int main()
         {
             commandBuffer[receivedBytes] = '\0';
 
-            try
-            {
-                angleError = std::stof(commandBuffer);
+            std::string command = commandBuffer;
 
-                std::cout
-                    << "Angle from Python: "
-                    << angleError
-                    << std::endl;
-            }
-            catch (...)
+            if (command.find("STOP") != std::string::npos)
             {
-                std::cout << "Invalid angle from Python\n";
+                emergencyStop = true;
+                std::cout << "Emergency stop: obstacle detected\n";
+            }
+            else
+            {
+                emergencyStop = false;
+
+                try
+                {
+                    angleError = std::stof(command);
+
+                    std::cout
+                        << "Angle from Python: "
+                        << angleError
+                        << std::endl;
+                }
+                catch (...)
+                {
+                    std::cout << "Invalid command from Python\n";
+                }
             }
         }
 
@@ -202,19 +220,22 @@ int main()
             deltaTime
         );
 
-        vehicle.rotate(steering);
+        if (!emergencyStop)
+        {
+            vehicle.rotate(steering);
 
-        float rotation = vehicle.getRotation() - 90.f;
-        float radian = rotation * 3.14159f / 180.f;
+            float rotation = vehicle.getRotation() - 90.f;
+            float radian = rotation * 3.14159f / 180.f;
 
-        sf::Vector2f direction(
-            std::cos(radian),
-            std::sin(radian)
-        );
+            sf::Vector2f direction(
+                std::cos(radian),
+                std::sin(radian)
+            );
 
-        vehicle.move(
-            direction * vehicleSpeed * deltaTime
-        );
+            vehicle.move(
+                direction * vehicleSpeed * deltaTime
+            );
+        }
 
         std::cout << "Frame sent\n";
 
