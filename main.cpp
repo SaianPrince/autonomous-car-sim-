@@ -12,8 +12,9 @@
 
 const int WINDOW_WIDTH = 800;
 const int WINDOW_HEIGHT = 600;
-const int ROI_WIDTH = 200;
-const int ROI_HEIGHT = 200;
+
+const int ROI_WIDTH = 300;
+const int ROI_HEIGHT = 300;
 
 bool sendAll(SOCKET socket, const char* data, int size)
 {
@@ -32,7 +33,7 @@ bool sendAll(SOCKET socket, const char* data, int size)
     return true;
 }
 
-sf::Image captureRoiFromWindow(sf::RenderWindow& window)
+sf::Image captureRoiFromWindow(sf::RenderWindow& window, sf::RectangleShape& vehicle)
 {
     sf::Texture screenTexture;
     screenTexture.create(WINDOW_WIDTH, WINDOW_HEIGHT);
@@ -43,8 +44,13 @@ sf::Image captureRoiFromWindow(sf::RenderWindow& window)
     sf::Image roiImage;
     roiImage.create(ROI_WIDTH, ROI_HEIGHT);
 
-    int roiX = 300;
-    int roiY = 250;
+    int roiX = static_cast<int>(vehicle.getPosition().x) - ROI_WIDTH / 2;
+    int roiY = static_cast<int>(vehicle.getPosition().y) - 170;
+
+    if (roiX < 0) roiX = 0;
+    if (roiY < 0) roiY = 0;
+    if (roiX + ROI_WIDTH >= WINDOW_WIDTH) roiX = WINDOW_WIDTH - ROI_WIDTH;
+    if (roiY + ROI_HEIGHT >= WINDOW_HEIGHT) roiY = WINDOW_HEIGHT - ROI_HEIGHT;
 
     for (int y = 0; y < ROI_HEIGHT; y++)
     {
@@ -68,7 +74,7 @@ int main()
     sf::RectangleShape vehicle(sf::Vector2f(50.f, 80.f));
     vehicle.setFillColor(sf::Color::Blue);
     vehicle.setOrigin(25.f, 40.f);
-    vehicle.setPosition(400.f, 500.f);
+    vehicle.setPosition(400.f, 520.f);
     vehicle.setRotation(0.f);
 
     sf::RectangleShape leftLane(sf::Vector2f(5.f, 600.f));
@@ -79,9 +85,9 @@ int main()
     rightLane.setFillColor(sf::Color::White);
     rightLane.setPosition(500.f, 0.f);
 
-    sf::RectangleShape obstacle(sf::Vector2f(80.f, 80.f));
+    sf::RectangleShape obstacle(sf::Vector2f(45.f, 45.f));
     obstacle.setFillColor(sf::Color::Red);
-    obstacle.setPosition(360.f, 180.f);
+    obstacle.setPosition(377.f, 120.f);
 
     WSADATA wsaData;
 
@@ -104,17 +110,9 @@ int main()
     serverAddress.sin_family = AF_INET;
     serverAddress.sin_port = htons(5000);
 
-    inet_pton(
-        AF_INET,
-        "127.0.0.1",
-        &serverAddress.sin_addr
-    );
+    inet_pton(AF_INET, "127.0.0.1", &serverAddress.sin_addr);
 
-    if (connect(
-        clientSocket,
-        (sockaddr*)&serverAddress,
-        sizeof(serverAddress)
-    ) == SOCKET_ERROR)
+    if (connect(clientSocket, (sockaddr*)&serverAddress, sizeof(serverAddress)) == SOCKET_ERROR)
     {
         std::cout << "Connection failed\n";
 
@@ -130,7 +128,6 @@ int main()
 
     float vehicleSpeed = 100.f;
     float angleError = 0.f;
-    bool emergencyStop = false;
 
     sf::Clock clock;
 
@@ -157,7 +154,7 @@ int main()
 
         window.display();
 
-        sf::Image roiImage = captureRoiFromWindow(window);
+        sf::Image roiImage = captureRoiFromWindow(window, vehicle);
 
         const sf::Uint8* pixels = roiImage.getPixelsPtr();
 
@@ -188,56 +185,34 @@ int main()
         {
             commandBuffer[receivedBytes] = '\0';
 
-            std::string command = commandBuffer;
-
-            if (command.find("STOP") != std::string::npos)
+            try
             {
-                emergencyStop = true;
-                std::cout << "Emergency stop: obstacle detected\n";
+                angleError = std::stof(commandBuffer);
+
+                std::cout
+                    << "Angle from Python: "
+                    << angleError
+                    << std::endl;
             }
-            else
+            catch (...)
             {
-                emergencyStop = false;
-
-                try
-                {
-                    angleError = std::stof(command);
-
-                    std::cout
-                        << "Angle from Python: "
-                        << angleError
-                        << std::endl;
-                }
-                catch (...)
-                {
-                    std::cout << "Invalid command from Python\n";
-                }
+                std::cout << "Invalid command from Python\n";
             }
         }
 
-        float steering = steeringPID.calculate(
-            angleError,
-            deltaTime
+        float steering = steeringPID.calculate(angleError, deltaTime);
+
+        vehicle.rotate(steering);
+
+        float rotation = vehicle.getRotation() - 90.f;
+        float radian = rotation * 3.14159f / 180.f;
+
+        sf::Vector2f direction(
+            std::cos(radian),
+            std::sin(radian)
         );
 
-        if (!emergencyStop)
-        {
-            vehicle.rotate(steering);
-
-            float rotation = vehicle.getRotation() - 90.f;
-            float radian = rotation * 3.14159f / 180.f;
-
-            sf::Vector2f direction(
-                std::cos(radian),
-                std::sin(radian)
-            );
-
-            vehicle.move(
-                direction * vehicleSpeed * deltaTime
-            );
-        }
-
-        std::cout << "Frame sent\n";
+        vehicle.move(direction * vehicleSpeed * deltaTime);
 
         sf::sleep(sf::milliseconds(16));
     }
