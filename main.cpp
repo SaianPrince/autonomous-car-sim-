@@ -77,17 +77,27 @@ int main()
     vehicle.setPosition(400.f, 520.f);
     vehicle.setRotation(0.f);
 
-    sf::RectangleShape leftLane(sf::Vector2f(5.f, 600.f));
-    leftLane.setFillColor(sf::Color::White);
-    leftLane.setPosition(300.f, 0.f);
+    // 3-lane road boundaries
+    sf::RectangleShape laneLine1(sf::Vector2f(5.f, 600.f));
+    laneLine1.setFillColor(sf::Color::White);
+    laneLine1.setPosition(250.f, 0.f);
 
-    sf::RectangleShape rightLane(sf::Vector2f(5.f, 600.f));
-    rightLane.setFillColor(sf::Color::White);
-    rightLane.setPosition(500.f, 0.f);
+    sf::RectangleShape laneLine2(sf::Vector2f(5.f, 600.f));
+    laneLine2.setFillColor(sf::Color::White);
+    laneLine2.setPosition(350.f, 0.f);
 
+    sf::RectangleShape laneLine3(sf::Vector2f(5.f, 600.f));
+    laneLine3.setFillColor(sf::Color::White);
+    laneLine3.setPosition(450.f, 0.f);
+
+    sf::RectangleShape laneLine4(sf::Vector2f(5.f, 600.f));
+    laneLine4.setFillColor(sf::Color::White);
+    laneLine4.setPosition(550.f, 0.f);
+
+    // Obstacle in the middle lane
     sf::RectangleShape obstacle(sf::Vector2f(45.f, 45.f));
     obstacle.setFillColor(sf::Color::Red);
-    obstacle.setPosition(377.f, 120.f);
+    obstacle.setPosition(377.f, 160.f);
 
     WSADATA wsaData;
 
@@ -124,9 +134,9 @@ int main()
 
     std::cout << "Connected to Python server\n";
 
-    PIDController steeringPID(0.08f, 0.0f, 0.02f);
+    PIDController steeringPID(0.04f, 0.0f, 0.01f);
 
-    float vehicleSpeed = 100.f;
+    float vehicleSpeed = 70.f;
     float angleError = 0.f;
 
     sf::Clock clock;
@@ -147,8 +157,11 @@ int main()
 
         window.clear(sf::Color::Black);
 
-        window.draw(leftLane);
-        window.draw(rightLane);
+        window.draw(laneLine1);
+        window.draw(laneLine2);
+        window.draw(laneLine3);
+        window.draw(laneLine4);
+
         window.draw(obstacle);
         window.draw(vehicle);
 

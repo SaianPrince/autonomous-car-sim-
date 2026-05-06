@@ -30,7 +30,6 @@ class PIDController:
         self.kp = kp
         self.ki = ki
         self.kd = kd
-
         self.previous_error = 0.0
         self.integral = 0.0
 
@@ -39,9 +38,7 @@ class PIDController:
             dt = 1e-6
 
         self.integral += error * dt
-
         derivative = (error - self.previous_error) / dt
-
         self.previous_error = error
 
         output = (
@@ -65,7 +62,6 @@ def bytes_to_frames(rgba_bytes):
 
 def detect_lanes(gray, pid, dt):
     blurred = cv2.GaussianBlur(gray, (5, 5), 0)
-
     edges = cv2.Canny(blurred, 50, 150)
 
     mask = np.zeros_like(edges)
@@ -121,7 +117,6 @@ def detect_lanes(gray, pid, dt):
         lane_center_x = image_center_x
 
     offset = image_center_x - lane_center_x
-
     angle = pid.compute(offset, dt)
 
     cv2.line(
@@ -210,7 +205,7 @@ def detect_red_obstacle(bgr):
     if obstacle_detected:
         cv2.putText(
             object_debug,
-            "COMMAND: AVOID",
+            "COMMAND: LANE CHANGE",
             (4, 18),
             cv2.FONT_HERSHEY_SIMPLEX,
             0.5,
@@ -254,6 +249,10 @@ def start_server():
     frame_n = 0
     prev_t = time.perf_counter()
 
+    avoidance_frames = 0
+    avoidance_direction = 0
+    target_lane_offset = 0.0
+
     try:
         while True:
             raw = receive_all(conn, IMAGE_SIZE)
@@ -268,17 +267,27 @@ def start_server():
 
             bgr, gray = bytes_to_frames(raw)
 
-            angle, lane_debug = detect_lanes(gray, pid, dt)
+            lane_angle, lane_debug = detect_lanes(gray, pid, dt)
 
             obstacle_detected, object_debug, red_mask, obstacle_center_x = detect_red_obstacle(bgr)
 
-            if obstacle_detected:
-                if obstacle_center_x is not None and obstacle_center_x < ROI_W / 2:
-                    command = "25.0\n"
+            if obstacle_detected and avoidance_frames == 0:
+                avoidance_frames = 35
+
+                if obstacle_center_x is not None and obstacle_center_x >= ROI_W / 2:
+                    avoidance_direction = -1
+                    target_lane_offset = -70.0
                 else:
-                    command = "-25.0\n"
+                    avoidance_direction = 1
+                    target_lane_offset = 70.0
+
+            if avoidance_frames > 0:
+                command_angle = avoidance_direction * 18.0
+                avoidance_frames -= 1
             else:
-                command = f"{angle:.4f}\n"
+                command_angle = lane_angle + target_lane_offset * 0.08
+
+            command = f"{command_angle:.4f}\n"
 
             conn.sendall(command.encode("ascii"))
 
@@ -290,7 +299,9 @@ def start_server():
                 print(
                     f"[FRAME {frame_n:05d}] "
                     f"command={command.strip()} "
-                    f"lane_angle={angle:+.2f} "
+                    f"lane_angle={lane_angle:+.2f} "
+                    f"avoidance_frames={avoidance_frames} "
+                    f"target_offset={target_lane_offset:+.1f} "
                     f"fps={fps:.1f}",
                     flush=True
                 )
