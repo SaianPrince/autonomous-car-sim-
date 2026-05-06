@@ -1,11 +1,15 @@
 """
-test_sender.py  —  C++ Simülatörü (Mock)
-Gerçek C++ / SFML olmadan brain.py'yi test etmek için kullanılır.
-200x200 RGBA frame içinde beyaz şerit çizgileri oluşturup TCP'den gönderir.
+test_sender.py  —  C++ Simülatörü (Mock) — Hafta 4
+────────────────────────────────────────────────────
+Gerçek C++ / SFML olmadan brain.py'yi test etmek için.
+200x200 RGBA frame içinde:
+  - Beyaz şerit çizgileri (şerit takibi testi)
+  - Periyodik kırmızı engel kutusu (YOLO / STOP testi)
+Protokol: doğrudan 160_000 byte RGBA → brain.py
+          brain.py'den ASCII string ("12.45\n" veya "STOP\n") al
 """
 
 import socket
-import struct
 import time
 import numpy as np
 import cv2
@@ -18,39 +22,58 @@ ROI_H = 200
 
 FRAME_DELAY = 1 / 30.0   # ~30 FPS
 
+# Engel kaç frame göründükten sonra kaybolsun
+OBSTACLE_APPEAR_EVERY  = 150   # 150 frame = 5 saniye
+OBSTACLE_VISIBLE_FRAMES = 90   # 3 saniye görünür
 
-def make_lane_frame(frame_idx: int) -> bytes:
+
+def make_frame(frame_idx: int) -> bytes:
     """
-    200x200 siyah zemin üzerine iki beyaz dikey şerit çizer.
-    frame_idx ile şeritleri hafifçe sallandırarak gerçekçilik katar.
+    Normal mod: yol + şeritler
+    Engel modu (periyodik): büyük kırmızı kutu eklenir
     Döndürür: RGBA bytes (160_000 byte)
     """
     img = np.zeros((ROI_H, ROI_W, 3), dtype=np.uint8)
 
-    # Hafif sinüsoidal titreşim — gerçekçi sürüş simülasyonu
-    wobble = int(5 * np.sin(frame_idx * 0.05))
+    # ── Şerit çizgileri ──────────────────────────
+    wobble  = int(8 * np.sin(frame_idx * 0.04))
+    left_x  = 55 + wobble
+    right_x = 145 + wobble
 
-    left_x  = 60 + wobble
-    right_x = 140 + wobble
+    # Yol zemini
+    road = np.zeros((ROI_H, ROI_W), dtype=np.uint8)
+    road[ROI_H // 2:, max(0, left_x):min(ROI_W, right_x)] = 35
+    img[:, :, 0] = np.maximum(img[:, :, 0], road)
+    img[:, :, 1] = np.maximum(img[:, :, 1], road)
+    img[:, :, 2] = np.maximum(img[:, :, 2], road)
 
-    # Şerit çizgileri (beyaz, kalın)
+    # Şeritler
     cv2.line(img, (left_x,  ROI_H // 2), (left_x,  ROI_H), (255, 255, 255), 5)
     cv2.line(img, (right_x, ROI_H // 2), (right_x, ROI_H), (255, 255, 255), 5)
 
-    # Yol zemini (koyu gri)
-    road_mask = np.zeros((ROI_H, ROI_W), dtype=np.uint8)
-    road_mask[ROI_H // 2:, left_x:right_x] = 40
-    img[:, :, 0] = np.maximum(img[:, :, 0], road_mask)
-    img[:, :, 1] = np.maximum(img[:, :, 1], road_mask)
-    img[:, :, 2] = np.maximum(img[:, :, 2], road_mask)
+    # ── Periyodik kırmızı engel ───────────────────
+    phase = frame_idx % OBSTACLE_APPEAR_EVERY
+    obstacle_active = phase < OBSTACLE_VISIBLE_FRAMES
 
-    # Kare numarasını üstüne yaz (debug)
-    cv2.putText(img, f"MOCK #{frame_idx}", (5, 15),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 200, 200), 1)
+    if obstacle_active:
+        # Engel boyutu zamanla büyür (yaklaşıyor efekti)
+        progress  = phase / OBSTACLE_VISIBLE_FRAMES       # 0 → 1
+        size      = int(30 + 90 * progress)               # 30 → 120 px
+        ox        = (ROI_W - size) // 2
+        oy        = max(0, int(ROI_H // 2 - size * progress))
 
-    # BGR → RGBA dönüşümü (C++ SFML ile aynı format)
+        cv2.rectangle(img, (ox, oy), (ox + size, oy + size), (0, 0, 220), -1)
+        cv2.putText(img, "ENGEL", (ox + 4, oy + size // 2),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.35, (255, 255, 255), 1)
+
+    # ── Kare bilgisi ─────────────────────────────
+    label = f"#{frame_idx}  {'[ENGEL]' if obstacle_active else ''}"
+    cv2.putText(img, label, (4, 14),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.35, (0, 200, 200), 1)
+
+    # BGR → RGBA
     rgba = cv2.cvtColor(img, cv2.COLOR_BGR2RGBA)
-    return rgba.tobytes()   # 200*200*4 = 160_000 bytes
+    return rgba.tobytes()
 
 
 def run() -> None:
@@ -58,29 +81,27 @@ def run() -> None:
 
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 
-    # brain.py henüz hazır olmayabilir, birkaç kez dene
-    for attempt in range(10):
+    for attempt in range(15):
         try:
             sock.connect((HOST, PORT))
             break
         except ConnectionRefusedError:
-            print(f"[MOCK C++] Bekleniyor... ({attempt+1}/10)", flush=True)
+            print(f"[MOCK C++] Bekleniyor... ({attempt + 1}/15)", flush=True)
             time.sleep(1)
     else:
         print("[MOCK C++] HATA: brain.py'ye bağlanılamadı!", flush=True)
         return
 
     print("[MOCK C++] Bağlandı! Frame gönderimi başlıyor...", flush=True)
+    print("[MOCK C++] Her 5 saniyede bir kırmızı engel çıkacak.", flush=True)
 
     frame_idx = 0
     try:
         while True:
-            frame_bytes = make_lane_frame(frame_idx)
-
-            # C++ ile aynı: önce 4 byte boyut YOK — doğrudan 160_000 byte gönder
+            frame_bytes = make_frame(frame_idx)
             sock.sendall(frame_bytes)
 
-            # brain.py'den HAFTA 3 protokolü: ASCII string  "12.45\n"
+            # brain.py'den ASCII yanıt al ("12.45\n" veya "STOP\n")
             raw = b''
             while not raw.endswith(b'\n'):
                 ch = sock.recv(1)
@@ -88,8 +109,17 @@ def run() -> None:
                     raise ConnectionResetError("brain.py bağlantıyı kapattı")
                 raw += ch
 
-            angle = float(raw.decode('ascii').strip())
-            print(f"[MOCK C++] Frame {frame_idx:04d} → angle = {angle:+.2f}°", flush=True)
+            response = raw.decode('ascii').strip()
+
+            if response == "STOP":
+                print(f"[MOCK C++] Frame {frame_idx:05d} → 🛑 STOP!", flush=True)
+            else:
+                try:
+                    angle = float(response)
+                    if frame_idx % 15 == 0:
+                        print(f"[MOCK C++] Frame {frame_idx:05d} → angle = {angle:+.2f}°", flush=True)
+                except ValueError:
+                    print(f"[MOCK C++] Bilinmeyen yanıt: {response!r}", flush=True)
 
             frame_idx += 1
             time.sleep(FRAME_DELAY)
@@ -100,6 +130,7 @@ def run() -> None:
         print("[MOCK C++] Kullanıcı durdurdu.", flush=True)
     finally:
         sock.close()
+        print("[MOCK C++] Kapatıldı.", flush=True)
 
 
 if __name__ == "__main__":
