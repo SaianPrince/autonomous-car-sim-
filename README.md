@@ -41,15 +41,15 @@ This project simulates an autonomous vehicle that detects lane boundaries, ident
 ## Screenshots
 
 ### Simulation Images
-![Simulation](image1.png)
+![Simulation](IMAGES/image1.png)
 
-![Simulation](image2.png)
+![Simulation](IMAGES/image2.png)
 
-![Simulation](image3.png)
+![Simulation](IMAGES/image3.png)
 
-![Simulation](image4.png)
+![Simulation](IMAGES/image4.png)
 
-![Simulation](image5.png)
+![Simulation](IMAGES/image5.png)
 
 ## How It Works
 1. The C++ simulation continuously captures the road view in front of the vehicle.
